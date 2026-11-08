@@ -1,0 +1,63 @@
+name: AOSP17 archived x86_64 Android GCC49 toolchain boundary
+on:
+  push:
+    branches:
+      - audit/a17-mondrian-x86_64-gcc49-target-boundary-20261108
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-archived-target-toolchain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            repo.prop
+            tests
+            docs
+            .github
+      - name: Pin independent PE-Reborn AOSP17 graph and test exclusions
+        run: |
+          set -euo pipefail
+          git init -q "$RUNNER_TEMP/pe-a17-manifest"
+          git -C "$RUNNER_TEMP/pe-a17-manifest" remote add origin \
+            https://github.com/PixelExperience-Reborn/manifest.git
+          git -C "$RUNNER_TEMP/pe-a17-manifest" fetch -q --depth 1 origin \
+            1bdc8020d74c7275de7dca76d2f95c798cdca6c3
+          git -C "$RUNNER_TEMP/pe-a17-manifest" checkout -q --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/pe-a17-manifest" rev-parse HEAD)" = \
+            "1bdc8020d74c7275de7dca76d2f95c798cdca6c3"
+          python3 "$RUNNER_TEMP/pe-a17-manifest/tools/validate_aosp17_base_profiles.py"
+          python3 -m unittest discover -s "$RUNNER_TEMP/pe-a17-manifest/tools" \
+            -p test_aosp17_manifest_entrypoint.py -v
+          python3 "$RUNNER_TEMP/pe-a17-manifest/tools/validate_135_repository_matrix.py"
+      - name: Fetch immutable Soong and mondrian reference text (not legacy binaries)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pe-a17-inputs"
+          curl --fail --location --silent --show-error --retry 3 \
+            "https://raw.githubusercontent.com/PixelExperience-Reborn/build_soong/6215d41c790a463b7795ce81ac77204c238cbf48/cc/config/global.go" \
+            --output "$RUNNER_TEMP/pe-a17-inputs/soong-global.go"
+          curl --fail --location --silent --show-error --retry 3 \
+            "https://raw.githubusercontent.com/LF52406/mondrian_android_device_xiaomi_sm8450-common/6e0022f5100e09ac97980095b6ed8528f4ff823f/BoardConfigCommon.mk" \
+            --output "$RUNNER_TEMP/pe-a17-inputs/BoardConfigCommon.mk"
+          test -s "$RUNNER_TEMP/pe-a17-inputs/soong-global.go"
+          test -s "$RUNNER_TEMP/pe-a17-inputs/BoardConfigCommon.mk"
+      - name: Audit historical GCC49 Git objects and broken wrapper, modern toolchain ownership
+        run: |
+          set -euo pipefail
+          PE_AOSP17_REFERENCE="$RUNNER_TEMP/pe-a17-manifest/aosp17_reference.xml" \
+          PE_AOSP17_DEFAULT="$RUNNER_TEMP/pe-a17-manifest/default.xml" \
+          PE_AOSP17_SOONG_GLOBAL="$RUNNER_TEMP/pe-a17-inputs/soong-global.go" \
+          PE_MONDRIAN_COMMON_BOARD="$RUNNER_TEMP/pe-a17-inputs/BoardConfigCommon.mk" \
+            python3 tests/test_aosp17_x86_64_gcc49_archive_boundary.py
+      - name: Scope
+        run: |
+          echo "Only metadata and 1733-byte Python wrapper source read from archive."
+          echo "Historical GNU GCC4.9 binaries have NOT been fetched or executed."
+          echo "No Android17 Soong build, kernel, vendor ABI, OTA or physical boot verified."
